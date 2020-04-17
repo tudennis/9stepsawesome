@@ -1,8 +1,8 @@
-Intial pom.xml created by start.spring.io
+Initial pom.xml created by start.spring.io
 
 mvn clean compile package
 
-java -jar target/boot-demo-0.0.1.jar
+java -jar target/boot-demo-1.0.0.jar
 or
 mvn spring-boot:run
 curl http://localhost:8080/
@@ -10,24 +10,19 @@ ctrl-c
 
 Manual Deployment
 
+export IMAGE_VER=boot-demo:1.0.0
 
-Easier Deployment
+docker build -f Dockerfile -t dev.local/burrsutter/$IMAGE_VER .
+docker login docker.io
+docker tag dev.local/burrsutter/$IMAGE_VER docker.io/burrsutter/$IMAGE_VER
+docker push docker.io/burrsutter/$IMAGE_VER
 
-minishift ip
-minishift oc-env
+or
 
-oc login $(minishift ip):8443 -u admin -p admin
-admin
-admin
+docker build -f Dockerfile -t dev.local/burrsutter/$IMAGE_VER .
+docker login quay.io
+docker tag dev.local/burrsutter/$IMAGE_VER quay.io/burrsutter/$IMAGE_VER
+docker push quay.io/burrsutter/$IMAGE_VER
 
-oc new-project bootdemo
-
-add to the pom.xml
-      <plugin>
-        <groupId>io.fabric8</groupId>
-        <artifactId>fabric8-maven-plugin</artifactId>
-        <version>3.5.40</version>
-      </plugin>
-
-mvn fabric8:deploy
-
+or 
+docker build -f Dockerfile.openshift -t dev.local/burrsutter/$IMAGE_VER .

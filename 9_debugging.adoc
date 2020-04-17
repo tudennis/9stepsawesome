@@ -3,6 +3,9 @@ Burr Sutter <burrsuter@gmail.com>
 
 == Java
 
+https://blog.christianposta.com/kubernetes/java-remote-debug-for-applications-running-in-kubernetes/
+
+
 https://hub.docker.com/r/fabric8/java-jboss-openjdk8-jdk/
 
 https://maven.fabric8.io/#fabric8:debug
@@ -22,6 +25,15 @@ apiVersion: v1
 kind: Service
 spec:
   type: NodePort
+----
+
+and Create a file called deployment.yml
+
+----
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  namespace: myspace
 ----
 
 mvn io.fabric8:fabric8-maven-plugin:3.5.40:setup

@@ -1,4 +1,4 @@
-= Step 3: exec Magic
+= Step 4: exec Magic
 Burr Sutter <burrsuter@gmail.com>
 
 ifndef::codedir[:codedir: kubefiles]
@@ -39,7 +39,7 @@ $ kubectl describe deployment/myboot
 You can hit its "consume" endpoint some more, watching it OOMKilled and restart
 
 ----
-$ curl $(minikube ip):$(kubectl get service/myboot -o jsonpath="{.spec.ports[*].nodePort}")/consume
+$ curl $(minikube --profile 9steps ip):$(kubectl get service/myboot -o jsonpath="{.spec.ports[*].nodePort}")/consume
 ----
 
 and
@@ -60,6 +60,8 @@ First you need the pod identifier and while you could just copy and paste it, it
 
 ----
 $ PODID=$(kubectl get pods -l app=myboot -o 'jsonpath={.items[0].metadata.name}')
+#OR
+# PODID=$(kubectl get pods -l app=myboot -o name)
 $ echo $PODID
 ----
 
@@ -128,22 +130,22 @@ No wonder the JVM reports a larger than accurate Max memory
 ----
 $ curl localhost:8080/sysresources
  Memory: 1324 Cores: 2
-$ java version
-openjdk version "1.8.0_171"
-OpenJDK Runtime Environment (build 1.8.0_171-8u171-b11-1~deb9u1-b11)
-OpenJDK 64-Bit Server VM (build 25.171-b11, mixed mode)
+$ java -version
+openjdk version "1.8.0_151"
+OpenJDK Runtime Environment (build 1.8.0_151-8u151-b12-1~deb9u1-b12)
+OpenJDK 64-Bit Server VM (build 25.151-b12, mixed mode)
 $ java -XshowSettings:vm -version
 VM settings:
     Max. Heap Size (Estimated): 1.29G
     Ergonomics Machine Class: server
     Using VM: OpenJDK 64-Bit Server VM
 
-openjdk version "1.8.0_171"
-OpenJDK Runtime Environment (build 1.8.0_171-8u171-b11-1~deb9u1-b11)
-OpenJDK 64-Bit Server VM (build 25.171-b11, mixed mode)
+openjdk version "1.8.0_151"
+OpenJDK Runtime Environment (build 1.8.0_151-8u151-b12-1~deb9u1-b12)
+OpenJDK 64-Bit Server VM (build 25.151-b12, mixed mode)
 ----
 
-So we can check out the cgroups settings
+Check out the cgroups settings
 
 ----
 $ cd /sys/fs/cgroup/memory/
@@ -161,17 +163,46 @@ VM settings:
     Ergonomics Machine Class: server
     Using VM: OpenJDK 64-Bit Server VM
 
-openjdk version "1.8.0_171"
-OpenJDK Runtime Environment (build 1.8.0_171-8u171-b11-1~deb9u1-b11)
-OpenJDK 64-Bit Server VM (build 25.171-b11, mixed mode)
+openjdk version "1.8.0_181"
+OpenJDK Runtime Environment (build 1.8.0_181-8u181-b13-1~deb9u1-b13)
+OpenJDK 64-Bit Server VM (build 25.181-b13, mixed mode)
 ----
 
 and you will notice a very different calculation for Max heap, now it is 112M, about 1/4 of the cgroups constrained memory.
-
-You can now either manually set -Xmx or use the experimental flags for JVM startup.
 
 To leave this pod, simply type "exit" and hit enter
 
 ----
 $ exit 
 ----
+
+You can now either manually set -Xmx or use the experimental flags for JVM startup.  We will be able to do this by creating a new version of the container for our myboot deployment.
+
+A Dockerfile called "Dockerfile_Memory" with the memory settings we need has been provided already in the hello/springboot directory.
+----
+$ docker build -f Dockerfile_Memory -t 9stepsawesome/myboot:v2 . <1>
+# delete any pods based on that image
+$ kubectl delete pods -l app=myboot
+----
+<1> _For this to work, your myboot deployment must be looking for an image of this name and version.  If you came here from step 2 then you might have left your deployment rolled back and pointing to v1 (causing the creation of this new image to be ignored).  Here's how you check and update:_
+----
+$ echo $(kubectl get deployment/myboot -o jsonpath="{.spec.template.spec.containers[*].image}")
+9stepsawesome/myboot:v1
+$ kubectl set image deployment/myboot myboot=9stepsawesome/myboot:v2
+----
+
+Wait a moment for the pod to be recreated from the new image then
+----
+$ curl $(minikube --profile 9steps ip):$(kubectl get service/myboot -o jsonpath="{.spec.ports[*].nodePort}")/sysresources
+ Memory: 112 Cores: 2
+----
+
+Now, your memory is more accurate though your core count is still high.  They are working on this in later versions of Java.
+
+And consume should no longer blow up
+----
+$ curl $(minikube --profile 9steps ip):$(kubectl get service/myboot -o jsonpath="{.spec.ports[*].nodePort}")/consume
+----
+
+
+More information on https://kubernetes.io/docs/tasks/debug-application-cluster/get-shell-running-container/[kubectl exec]

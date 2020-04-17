@@ -1,10 +1,21 @@
-var http = require('http');
-var cnt = 0;
+const os = require('os');
+const http = require('http');
+let cnt = 0;
 
-http.createServer(function (req, res) {
-    var now = new Date();
-    res.end('Bonjour from Node.js! ' + cnt++ + ' on ' + process.env.HOSTNAME  + '\n');
+http.createServer((req, res) =>
+{
+    // don't increment the counter if the favicon.ico is being requested
+    if (req.url.toLowerCase() === '/favicon.ico') {
+        res.writeHead(200, { 'Content-Type': 'image/x-icon' });
+        res.end();
+        console.log('favicon requested');
+        return;
+    }
+
+    res.end(`Node Bonjour on ${os.hostname()} ${cnt++} \n`);
+}
     
-}).listen(8000, '0.0.0.0');
-console.log('Server running at http://:8000/');
+).listen(8000);
+
+console.log(`Server running at http://localhost:8000/`);
 

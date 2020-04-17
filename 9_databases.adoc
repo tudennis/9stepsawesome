@@ -1,0 +1,212 @@
+= Step 9: Databases
+Burr Sutter <burrsuter@gmail.com>
+
+ifndef::codedir[:codedir: code]
+ifndef::imagesdir[:imagesdir: images]
+
+== Postgres via Deployments
+
+1. PersistentVolume
+2. PersistentVolumeClaim
+3. Deployment
+4. Service
+
+[source,bash]
+----
+$ minikube --profile 9steps docker-env
+# or
+$ minishift docker-env
+
+$ eval $(minikube --profile 9steps docker-env)
+----
+
+Pre-pull the docker image
+
+[source,bash]
+----
+$ docker pull postgres:10.5
+----
+
+Check to see if you have any preconfigured PVs
+
+[source,bash]
+----
+$ kubectl get pv --all-namespaces
+----
+
+Create the PV, PVC, Deployment and Service
+
+[source,bash]
+----
+$ kubectl create -f kubefiles/postgres-pv.yml
+$ kubectl get pv/postgres-pv
+NAME          CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS      CLAIM     STORAGECLASS   REASON    AGE
+postgres-pv   2Gi        RWO            Retain           Available             mystorage                14s
+
+$ kubectl create -f kubefiles/postgres-pvc.yml
+$ kubectl get pv/postgres-pv
+NAME          CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS    CLAIM               STORAGECLASS   REASON    AGE
+postgres-pv   2Gi        RWO            Retain           Bound     myspace/postgres-pvc   mystorage                49s
+
+$ kubectl get pvc/postgres-pvc
+NAME           STATUS    VOLUME        CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+postgres-pvc   Bound     postgres-pv   2Gi        RWO            mystorage      27s
+
+$ kubectl create -f kubefiles/postgres-deployment.yml
+$ kubectl get pods
+NAME                       READY     STATUS    RESTARTS   AGE
+postgres-bf856c974-9hdrp   1/1       Running   0          5s
+
+$ kubectl create -f kubefiles/postgres-service.yml
+----
+
+Now, make the Postgres port 5432 available at localhost
+
+[source,bash]
+----
+$ kubectl port-forward <posgtres-pod> 5433:5432
+----
+
+Access with pgAdmin https://www.postgresql.org/ftp/pgadmin/pgadmin4/v3.4 footnote:[Admin login details can be found in the kubefiles/postgres-depoloyment.yml]
+
+.pgAdmin Add Server
+image::pgadmin_add_server.png[pgAdmin Add Server]
+
+.pgAdmin Add Server 2
+image::pgadmin_add_server2.png[pgAdmin Add Server 2]
+
+
+Select Tools -> Query Tool and write and execute the following 
+
+[source,sql]
+----
+CREATE ROLE myuser WITH LOGIN PASSWORD 'mypassword';
+----
+----
+ALTER ROLE myuser CREATEDB;
+----
+----
+CREATE DATABASE mydb;
+----
+----
+ALTER DATABASE mydb owner to "myuser";
+----
+
+Note: You can also run psql CLI from within the Postgres Pod
+----
+$ kubectl exec -it postgres-bf856c974-xqtf8 /bin/bash
+# replacing postgres-bf856c974-xqtf8 with your pod id
+$ psql --username "$POSTGRES_USER" --dbname "$POSTGRES_DB"
+
+postgresdb-# \l
+----
+
+psql tips:
+
+----
+\l (list databases)
+\c newDatabase (switch database) 
+\dt (list tables)
+\q quit
+----
+
+
+Run the Spring Boot + Postgres app on localhost.  This is using Hibernate's ability to generate database schema from the object model
+
+[source,bash]
+----
+$ cd hellodata/boot_postgres
+
+$ mvn spring-boot:run -Dspring-boot.run.arguments=--spring.config.location=src/main/resources/application-local.properties
+----
+
+There are 2 application.properties files, one for localhost testing and one for "production" when it runs inside of Kubernetes/OpenShift
+
+Check pgAdmin
+
+.pgAdmin Tables
+image::pgadmin_schema_creation.png[pgAdmin Tables]
+
+
+Add a test question by POST'ing the testquestion.json file
+
+[source,bash]
+----
+$ curl -X POST http://localhost:8080/questions -d @testquestion.json --header "Content-Type: application/json"
+----
+
+Query for the questions in the database via the REST API
+
+[source,bash]
+----
+$ curl http://localhost:8080/questions
+----
+
+.pgAdmin Questions
+image::pgadmin_query_questions1.png[pgAdmin Questions]
+
+
+Now, let's run the Spring Boot app as a Pod
+
+[source,bash]
+----
+$ mvn clean package -DskipTests
+$ docker build -t 9stepsawesome/mybootdata:v1 .
+$ cd ../../
+$ kubectl create -f kubefiles/mybootdata-deployment.yml
+$ kubectl create -f kubefiles/mybootdata-service.yml
+$ kubectl get service/mybootdata -o jsonpath="{.spec.ports[*].nodePort}"
+$ QAHOSTPORT=$(minikube --profile 9steps ip):$(kubectl get service/mybootdata -o jsonpath="{.spec.ports[*].nodePort}")
+$ curl $QAHOSTPORT/questions
+$ cd hellodata/boot_postgres
+$ curl -X POST $QAHOSTPORT/questions -d @anotherquestion.json --header "Content-Type: application/json"
+$ curl $QAHOSTPORT/questions
+----
+
+.pgAdmin Questions
+image::pgadmin_query_questions.png[pgAdmin Questions]
+
+.Browser Questions
+image::chrome_rest_api.png[Browser Questions]
+
+Let's see if the data sticks around
+----
+$ kubectl delete pod -l app=postgres
+----
+
+and after the pod gets recreated, check your /questions endpoint
+----
+$ curl $QAHOSTPORT/questions
+{"content":[{"createdAt":"2019-10-08T17:41:50.869+0000","updatedAt":"2019-10-08T17:41:50.869+0000","id":1000,"title":"How to walk my dog?","description":"I need to walk my dog on a regular basis, the dog is about 20 pounds and has rather short legs.  She is always eager to go but often I am too busy or distracted.  What are some strategies for insuring the dog gets walked more often?"},{"createdAt":"2019-10-08T21:46:49.825+0000","updatedAt":"2019-10-08T21:46:49.825+0000","id":1051,"title":"How to shave my yak?","description":"My boss has asked for daily TPS reports, how can I convince him this is simply yak shaving?"}],"pageable":{"sort":{"sorted":false,"unsorted":true},"pageSize":20,"pageNumber":0,"offset":0,"paged":true,"unpaged":false},"last":true,"totalPages":1,"totalElements":2,"first":true,"sort":{"sorted":false,"unsorted":true},"numberOfElements":2,"size":20,"number":0}
+----
+
+make sure to restart the port forwarding
+
+----
+$ kubectl port-forward postgres-645fbb48f-hml79 5433:5432
+----
+
+
+== Sharing the in-container data with the host MacOS or Windows
+
+https://github.com/kubernetes/minikube/blob/master/docs/persistent_volumes.md
+
+
+To share the in-VM directory with the host OS
+
+minikube automatically shares /Users with the VM
+
+----
+minikube --profile 11steps ssh
+cd /Users
+----
+
+minishift does not automatically share a folder with the VM, so for equivalent functionality
+
+----
+minishift hostfolder add -t sshfs --source /Users --target /Users Users
+----
+
+Note: The Postgres image will not start by default on /Users/ due to permissions problems
+
+

@@ -4,13 +4,13 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"time"
+//	"time"
 )
 
 func main() {
 
 	//api := mux.NewRouter()
-	http.HandleFunc("/hello", HelloHandler)
+	http.HandleFunc("/", HelloHandler)
 	//http.Handle("/hello", api)
     
 	fmt.Println("Listening on localhost:8000")
@@ -24,5 +24,6 @@ func HelloHandler(w http.ResponseWriter, r *http.Request) {
 		fmt.Println("unable to get hostname")
 	}
     
-	fmt.Fprintf(w, "Hello from Go! %s on %s\n", time.Now(), hostname)
+	// fmt.Fprintf(w, "Hello from Go! %s on %s\n", time.Now(), hostname)
+	fmt.Fprintf(w, "Go Hello on %s\n", hostname)
 }

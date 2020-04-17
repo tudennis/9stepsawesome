@@ -21,7 +21,7 @@ kube-system   Active    22h
 The -o yaml trick is a great way to see what the command created
 
 ----
-$ kubectl get namespace/demo -o yaml
+$ kubectl get namespace demo -o yaml
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -37,7 +37,14 @@ status:
   phase: Active
 ----
 
-Deleting a Namespace is also available via command
+You can also use the 
+----
+$ kubectl get namespace/demo --export -o yaml 
+----
+for something cleaner, something you might store and use later with kubectl apply -f
+
+
+Deleting a Namespace is also available via command.  Deleting the namespace will remove all other objects that were created within this namespace.
 
 ----
 $ kubectl delete namespace/demo 
@@ -46,10 +53,13 @@ $ kubectl delete namespace/demo
 Your objects should be created via a file that can be checked into source control.  Create a Namespace via yaml.
 
 ----
+$ cd 9stepsawesome
 $ kubectl create -f kubefiles/myspace-namespace.yml # <1>
-$ kubectl config set-context minikube --namespace=myspace # <2>
+$ kubectl config set-context --current --namespace=myspace # <2>
 # or if you are using minishift and oc, there is a shortcut
 $ oc project myspace
+# or if you installed kubectx, try
+# kubens myspace
 ----
 <1> Using the yaml allows you to place this file in a source repository
 <2> The setting of the context means you have to type -n myspace less often.  Also, when using Minishift,
@@ -63,22 +73,210 @@ include::kubefiles/myspace-namespace.yml[]
 You can confirm your context with
 ----
 $ kubectl config view --minify --template '{{ index .contexts 0 "context" "namespace" }}'
-# of if you are using minishift and oc then there is a handy shortcut
+# or if you are using minishift and oc then there is a handy shortcut
 $ oc project
-
+# or you can use kubens tool which comes with kubectx (brew install kubectx)
+$ kubens
 ----
 
-== Code
+== Pods
+
+https://kubernetes.io/docs/concepts/workloads/pods/pod-overview/[Pod]
+
+Create a standalone Pod
+
+----
+cat <<EOF | kubectl apply -f -
+apiVersion: v1
+kind: Pod
+metadata:
+  name: quarkus-demo
+spec:
+  containers:
+  - name: quarkus-demo
+    image: quay.io/burrsutter/quarkus-demo:1.0.0
+EOF
+----
+
+Delete the Pod
+
+----
+$ kubectl delete pod quarkus-demo
+----
+
+== ReplicaSets
+
+https://kubernetes.io/docs/concepts/workloads/controllers/replicaset/[ReplicaSet]
+
+Create a ReplicaSet
+
+----
+cat <<EOF | kubectl apply -f -
+apiVersion: apps/v1
+kind: ReplicaSet
+metadata:
+    name: rs-quarkus-demo
+spec:
+    replicas: 3
+    selector:
+       matchLabels:
+          app: quarkus-demo
+    template:
+       metadata:
+          labels:
+             app: quarkus-demo
+             env: dev
+       spec:
+          containers:
+          - name: quarkus-demo
+            image: quay.io/burrsutter/quarkus-demo:1.0.0
+EOF
+----
+
+See what it produced
+
+----
+$ kubectl get pods --show-labels
+NAME                    READY   STATUS    RESTARTS   AGE   LABELS
+rs-quarkus-demo-64dnl   1/1     Running   0          49s   app=quarkus-demo,env=dev
+rs-quarkus-demo-8pn8b   1/1     Running   0          29s   app=quarkus-demo,env=dev
+rs-quarkus-demo-ksm5f   1/1     Running   0          16s   app=quarkus-demo,env=dev
+----
+
+Pick a pod and delete it
+----
+$ kubectl delete pod rs-quarkus-demo-rzfs2
+----
+
+and watch a new one spin up to take its place, it will be the youngest
+----
+NAME                    READY   STATUS    RESTARTS   AGE
+rs-quarkus-demo-7f56r   1/1     Running   0          6s
+rs-quarkus-demo-mzb6m   1/1     Running   0          3m
+rs-quarkus-demo-zxbhq   1/1     Running   0          3m
+----
+
+The pods are owned by the replicaSet
+----
+$ kubectl get pod rs-quarkus-demo-vpppb -o json | jq ".metadata.ownerReferences[]"
+----
+
+Delete the replicatset
+----
+$ kubectl delete replicaset rs-quarkus-demo
+----
+
+ and watch all pods terminate
+----
+NAME                    READY   STATUS        RESTARTS   AGE
+rs-quarkus-demo-kqbwr   0/1     Terminating   0          1m
+rs-quarkus-demo-trc5t   0/1     Terminating   0          5m
+rs-quarkus-demo-x92s7   0/1     Terminating   0          5m
+----
+
+== Deployments
+
+https://kubernetes.io/docs/concepts/workloads/controllers/deployment/[Deployments]
+
+----
+cat <<EOF | kubectl apply -f -
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: quarkus-demo-deployment
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: quarkus-demo
+  template:
+    metadata:
+      labels:        
+        app: quarkus-demo
+        env: dev
+    spec:
+      containers:
+      - name: quarkus-demo
+        image: quay.io/burrsutter/quarkus-demo:1.0.0
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+EOF
+----
+
+----
+$ kubectl get pods --show-labels
+NAME                                     READY   STATUS    RESTARTS   AGE   LABELS
+quarkus-demo-deployment-68557484-b6jbr   1/1     Running   0          96s   app=quarkus-demo,env=dev,pod-template-hash=68557484
+quarkus-demo-deployment-68557484-ccphv   1/1     Running   0          96s   app=quarkus-demo,env=dev,pod-template-hash=68557484
+quarkus-demo-deployment-68557484-pwk9b   1/1     Running   0          96s   app=quarkus-demo,env=dev,pod-template-hash=68557484
+----
+
+Run curl inside of the Pod (more on "exec" later)
+----
+$ kubectl exec -it quarkus-demo-deployment-68557484-pwk9b -- curl localhost:8080
+----
+
+Note: No Naked Pods
+
+https://kubernetes.io/docs/concepts/configuration/overview/#naked-pods-vs-replicasets-deployments-and-jobs[No Naked]
+
+
+== Services
+
+The Service makes places those more ephemeral individual Pod IPs behind a single IP & load-balancer
+
+https://kubernetes.io/docs/concepts/services-networking/service/[Services]
+
+----
+cat <<EOF | kubectl apply -f - 
+apiVersion: v1
+kind: Service
+metadata:
+  name: the-service
+spec:
+  selector:
+    app: quarkus-demo
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8080
+  type: NodePort
+EOF
+----
+
+curl those Endpoints behind that Service
+----
+$ IP=$(minikube --profile 9steps ip)
+$ PORT=$(kubectl get service the-service -o jsonpath="{.spec.ports[*].nodePort}")
+$ while true; do curl $IP:$PORT; sleep .5; done
+----
+
+=== Clean Up
+----
+$ kubectl delete service the-service
+$ kubectl delete deployment quarkus-demo-deployment
+----
+
+== Labels
+
+See 10_funstuff.adoc
+
+
+
+== Code & Build
 Now that you have a Namespace, you need to craft some code
 
 The "hello" directory contains several "hello world" style projects.  Let's use SpringBoot and run a quick test of the endpoint.
 
 ----
-$ cd hello/SpringBoot
+$ cd hello/springboot
 $ mvn clean package
 $ java -jar target/boot-demo-0.0.1.jar
 $ curl localhost:8080
 ----
+
+Note: You can also just use the image directly from Quay.io https://quay.io/repository/burrsutter/myboot?tab=tags
 
 Next create the docker image, first double check that you are still connected to the correct Docker daemon
 
@@ -89,13 +287,16 @@ $ docker build -t 9stepsawesome/myboot:v1 .
 
 Test that docker image
 ----
-$ minikube ip
-$ docker run -it -p 8080:8080 9stepsawesome/myboot:v1 
-$ curl $(minikube ip):8080
+$ docker run -d -p 8080:8080 --name myboot 9stepsawesome/myboot:v1 
+# OR
+# docker run -d -p 8080:8080 --name myboot quay.io/burrsutter/myboot:v1
+# wait for container to come up <1>
+$ curl $(minikube -p 9steps ip):8080 <2>
+# If working, you can stop the container with
+$ docker stop myboot
 ----
-
-Since the docker container is running "inside" the minikube/minishift VM, you need to use its IP address
-ctrl-c to terminate the Spring Boot process and its docker container.
+<1> You can check the status of the container from another window using the command: docker logs -f myboot 
+<2> Since the docker container is running "inside" the minikube/minishift VM, you need to use its IP address
 
 
 == Deployment
@@ -132,7 +333,7 @@ $ kubectl get service/myboot -o jsonpath="{.spec.ports[*].nodePort}"
 
 Curl that url + nodePort
 ----
-$ curl $(minikube ip):$(kubectl get service/myboot -o jsonpath="{.spec.ports[*].nodePort}")
+$ curl $(minikube -p 9steps ip):$(kubectl get service/myboot -o jsonpath="{.spec.ports[*].nodePort}")
 ----
 
 Perhaps build a little loop to curl that endpoint
@@ -140,7 +341,7 @@ Perhaps build a little loop to curl that endpoint
 ----
 while true
 do 
-  curl $(minikube ip):$(kubectl get service/myboot -o jsonpath="{.spec.ports[*].nodePort}")
+  curl $(minikube -p 9steps ip):$(kubectl get service/myboot -o jsonpath="{.spec.ports[*].nodePort}")
   sleep .5;
 done
 ----
@@ -171,16 +372,28 @@ $ kubectl edit deployment/myboot
 esc-w-q
 ----
 
+Note: You can use VS Code as your editor with export KUBE_EDITOR="code -w"
+
+
 You can then use "kubectl get pods" to see the pods that have been created
 ----
 $ kubectl get pods
+----
+
+Note: 3 pods might push you out of your memory limits for your VM.  Check your memory usage with:
+----
+$ minishift -p 9steps ssh
+# or
+$ minikube ssh
+$ free -m
+$ top -o %MEM
 ----
 
 == Update
 
 Update MyRESTController.java
 ----
-return "Bonjour from Spring Boot! " + count++ + " on " + hostname + "\n";
+greeting = environment.getProperty("GREETING","Bonjour");
 ----
 
 Compile & Build the fat jar
@@ -190,7 +403,7 @@ mvn clean package
 
 You can test with "java -jar target/boot-demo-0.0.1.jar" and "curl localhost:8080".  Ideally, you would have unit tests executed with "mvn test" as well.
 
-Build the new docker image
+Build the new docker image with a v2 tag
 ----
 $ docker build -t 9stepsawesome/myboot:v2 .
 $ docker images | grep myboot
@@ -199,13 +412,15 @@ $ docker images | grep myboot
 Rollout the update
 ----
 $ kubectl set image deployment/myboot myboot=9stepsawesome/myboot:v2
+OR
+$ kubectl set image deployment/myboot myboot=quay.io/burrsutter/myboot:v2
 ----
 
 And if you were running your polling curl command, you might see
 ----
-Hello from Spring Boot! 346 on myboot-79bfc988c8-ttz5r
-Hello from Spring Boot! 270 on myboot-79bfc988c8-ntb8d
-Hello from Spring Boot! 348 on myboot-79bfc988c8-ttz5r
+Aloha from Spring Boot! 346 on myboot-79bfc988c8-ttz5r
+Aloha from Spring Boot! 270 on myboot-79bfc988c8-ntb8d
+Aloha from Spring Boot! 348 on myboot-79bfc988c8-ttz5r
 curl: (7) Failed to connect to 192.168.99.105 port 31218: Connection refused
 curl: (7) Failed to connect to 192.168.99.105 port 31218: Connection refused
 curl: (7) Failed to connect to 192.168.99.105 port 31218: Connection refused
@@ -232,13 +447,13 @@ $ kubectl scale --replicas=1 deployment/myboot
 
 Hit the sysresources endpoint
 ----
-$ curl $(minikube ip):$(kubectl get service/myboot -o jsonpath="{.spec.ports[*].nodePort}")/sysresources
+$ curl $(minikube -p 9steps ip):$(kubectl get service/myboot -o jsonpath="{.spec.ports[*].nodePort}")/sysresources
  Memory: 1324 Cores: 2
 ----
 
 Note: you can use echo to see what this URL really looks like on your machine
 ----
-$ echo $(minikube ip):$(kubectl get service/myboot -o jsonpath="{.spec.ports[*].nodePort}")/sysresources
+$ echo $(minikube -p 9steps ip):$(kubectl get service/myboot -o jsonpath="{.spec.ports[*].nodePort}")/sysresources
 192.168.99.105:30479/sysresources
 ----
 
@@ -259,7 +474,7 @@ $ kubectl replace -f kubefiles/myboot-deployment-resources.yml
 
 Curl sysresources again
 ----
-$ curl $(minikube ip):$(kubectl get service/myboot -o jsonpath="{.spec.ports[*].nodePort}")/sysresources
+$ curl $(minikube -p 9steps ip):$(kubectl get service/myboot -o jsonpath="{.spec.ports[*].nodePort}")/sysresources
 Memory: 1324 Cores: 2
 ----
 
@@ -270,7 +485,7 @@ $ kubectl get pods -w
 
 and now curl the consume endpoint
 ----
-$ curl $(minikube ip):$(kubectl get service/myboot -o jsonpath="{.spec.ports[*].nodePort}")/consume
+$ curl $(minikube -p 9steps ip):$(kubectl get service/myboot -o jsonpath="{.spec.ports[*].nodePort}")/consume
 ----
 
 and you should see a OOMKilled
